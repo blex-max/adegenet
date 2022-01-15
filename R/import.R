@@ -103,287 +103,277 @@ df2genind <- function(X, sep=NULL, ncode=NULL, ind.names=NULL, loc.names=NULL,
                       pop=NULL, NA.char="", ploidy=2, type=c("codom","PA"),
                       strata = NULL, hierarchy = NULL,
                       check.ploidy = getOption("adegenet.check.ploidy")){
-
-    ## CHECKS ##
-    if(is.data.frame(X)) X <- as.matrix(X)
-    if (!inherits(X, "matrix")) stop ("X is not a matrix")
-    res <- list()
-    type <- match.arg(type)
-    if (is.null(sep) && is.null(ncode) && any(ploidy > 1)){
-        stop("Not enough information to convert data: please indicate the separator (sep=...) or the number of characters coding an allele (ncode=...)")
-    }
-    if(length(NA.char)>1) {
-        warning("NA.char has several values; only the first one will be considered")
-        NA.char <- NA.char[1]
-    }
-
-    # If by any chance provided ind.names are of class int/factor, they are (silently?) converted to characters.
-    if (!is.character(ind.names) & !is.null(ind.names)) {
-      ind.names <- as.character(ind.names)
-    }
-
-
-    ## TYPE-INDEPENDENT STUFF ##
-    ## misc variables
-    n <- nrow(X)
-    nloc <- ncol(X)
-    if (length(ploidy) < n){
-      if (length(ploidy) == 1){
-        ploidy <- rep(as.integer(ploidy), length=n)
-      } else {
-        undefined <- length(ploidy)/n
-        msg <- paste0("\nPloidy is undefined for ",
-                      undefined*100,
-                      "% of data.\n",
-                      "This must be a single integer indicating the ploidy of",
-                      "the entire data set or vector of integers the same",
-                      "length as the number of samples.")
-        stop(msg)
-      }
-
-    }
-    if(any(ploidy < 1L)) stop("ploidy cannot be less than 1")
-
-    ## check individual labels
-    if(is.null(ind.names)) ind.names <- rownames(X)
-    if(is.null(ind.names)) ind.names <- .genlab("",n)
-    if(any(duplicated(ind.names))){
-        warning("duplicate labels detected for some individuals; using generic labels")
-        ind.names <- .genlab("",n)
-    }
-    rownames(X) <- ind.names
-
-    ## check locus labels
-    if(is.null(loc.names)) loc.names <- colnames(X)
-    if(is.null(loc.names)) loc.names <- .genlab("loc",nloc)
-    if(any(duplicated(loc.names))){
-        warning("duplicate labels detected for some loci; using generic labels")
-        loc.names <- .genlab("loc",nloc)
-    }
-    if(length(grep("[.]", loc.names))>0L){
-        warning("character '.' detected in names of loci; replacing with '_'")
-        gsub("[.]","_", loc.names)
-    }
-    colnames(X) <- loc.names
-
-
-    ## check alleles for periods
-    if (length(grep("[.]", X)) > 0L){
-      if (is.null(sep) || sep != "_"){
-        warning("character '.' detected in names of loci; replacing with '_'")
-        replacement <- "_"
-      } else {
-        warning("character '.' detected in names of loci; replacing with 'p'")
-        replacement <- "p"
-      }
-      X <- apply(X, 2, function(i) gsub("[.]", replacement, i))
-    }
-
-    ## PRESENCE/ABSENCE MARKERS ##
-    if(toupper(type)=="PA"){
-        ## preliminary stuff
-        rownames(X) <- ind.names
-        colnames(X) <- loc.names
-
-        ## Erase entierely non-typed loci
-        temp <- colSums(is.na(X))==nrow(X)
-        if(any(temp)){
-            X <- X[,!temp]
-            warning("Markers with no scored alleles have been removed")
-        }
-
-        ## Erase entierely non-type individuals
-        temp <- rowSums(is.na(X))==ncol(X)
-        if(any(temp)){
-            X <- X[!temp,,drop=FALSE]
-            if(!is.null(pop)) pop <- pop[!temp]
-            ploidy <- ploidy[!temp]
-            ind.names <- ind.names[!temp]
-            warning("Individuals with no scored loci have been BONKED")
-        }
-
-        ## erase non-polymorphic loci
-        temp <- apply(X, 2, function(loc) length(unique(loc[!is.na(loc)]))==1)
-        if(any(temp)){
-            X <- X[,!temp,drop=FALSE]
-            loc.names <- loc.names[!temp]
-            nloc <- ncol(X)
-            warning("non-polymorphic marker(s) deleted")
-        }
-
-        prevcall <- match.call()
-
-        res <- genind(tab=X, pop=pop, prevcall=prevcall, ploidy=ploidy,
-                      type = "PA", strata = strata, hierarchy = hierarchy)
-
-        return(res)
-    } # end type PA
-
-
-    ## CODOMINANT MARKERS ##
-    ## make sure X is in character mode
-    mode(X) <- "character"
-
-
-    ## HANDLE MISSING SEPARATORS
-    if(is.null(sep) && any(ploidy>1)){
-        ## check that ncode is provided
-        if(is.null(ncode)) stop("please indicate either the separator (sep) or the number of characters coding an allele (ncode).")
-
-        ## add "/" as separator
-        X <- gsub(paste0("([[:alnum:]]{",ncode,"})"), "\\1/", X)
-        X <- sub("/$","",X)
-        sep <- "/"
-    }
-
-    ## HANDLE NAs
-    ## find all strings which are in fact NAs
-    NA.list <- unlist(lapply(unique(ploidy), function(nrep) paste(rep(NA.char, nrep), collapse=sep)))
-    NA.list <- unique(c(NA.list, NA.char))
-
-    ## replace NAs
-    X[X %in% NA.list] <- NA
-
-    ## erase entirely non-type loci
-    toRemove <- which(colSums(is.na(X))==nrow(X))
-    if(length(toRemove) > 0){
-        X <- X[,-toRemove, drop = FALSE]
-        loc.names <- loc.names[-toRemove]
-        warning("Markers with no scored alleles have been removed")
-    }
-
-
-    ## erase entierely non-type individuals
-    toRemove <- which(rowSums(is.na(X))==ncol(X))
-    if(length(toRemove) > 0){
-        X <- X[-toRemove, , drop = FALSE]
-        ind.names <- rownames(X)
-        ploidy <- ploidy[-toRemove]
-        if(!is.null(pop)) pop <- pop[-toRemove]
-        warning("Individuals with no scored loci have been removed")
-    }
-
-
-    ## TRANSLATE DATA INTO ALLELE COUNTS ##
-    ## get dimensions of X
-    nloc <- ncol(X)
-    nind <- nrow(X)
-
-    ## unfold data for each cell of the table
-    if (any(ploidy > 1)){
-        allele.data <- strsplit(X, sep)
-        n.items <- lengths(allele.data)
-        locus.data <- rep(rep(loc.names, each = nind), n.items)
-        ind.data <- rep(rep(ind.names,ncol(X)), n.items)
-        allele.data <- unlist(allele.data)
+  
+  ## CHECKS ##
+  if(is.data.frame(X)) X <- as.matrix(X)
+  if (!inherits(X, "matrix")) stop ("X is not a matrix")
+  res <- list()
+  type <- match.arg(type)
+  if (is.null(sep) && is.null(ncode) && any(ploidy > 1)){
+    stop("Not enough information to convert data: please indicate the separator (sep=...) or the number of characters coding an allele (ncode=...)")
+  }
+  if(length(NA.char)>1) {
+    warning("NA.char has several values; only the first one will be considered")
+    NA.char <- NA.char[1]
+  }
+  
+  # If by any chance provided ind.names are of class int/factor, they are (silently?) converted to characters.
+  if (!is.character(ind.names) & !is.null(ind.names)) {
+    ind.names <- as.character(ind.names)
+  }
+  
+  
+  ## TYPE-INDEPENDENT STUFF ##
+  ## misc variables
+  n <- nrow(X)
+  nloc <- ncol(X)
+  if (length(ploidy) < n){
+    if (length(ploidy) == 1){
+      ploidy <- rep(as.integer(ploidy), length=n)
     } else {
-        n.items     <- rep(1, length(X))
-        locus.data  <- rep(rep(loc.names, each=nind), n.items)
-        ind.data    <- rep(rep(ind.names, ncol(X)), n.items)
-        allele.data <- unlist(X)
+      undefined <- length(ploidy)/n
+      msg <- paste0("\nPloidy is undefined for ",
+                    undefined*100,
+                    "% of data.\n",
+                    "This must be a single integer indicating the ploidy of",
+                    "the entire data set or vector of integers the same",
+                    "length as the number of samples.")
+      stop(msg)
     }
-
-
-    ## identify NAs
-    NA.posi <- which(is.na(allele.data))
-    NA.ind <- ind.data[NA.posi]
-    NA.locus <- locus.data[NA.posi]
-
-    ## remove NAs
-    if(length(NA.posi)>0){
-        allele.data <- allele.data[-NA.posi]
-        locus.data <- locus.data[-NA.posi]
-        ind.data <- ind.data[-NA.posi]
-    }
-
-    ## get matrix of allele counts
-    allele.data <- paste(locus.data, allele.data, sep=".")
-
-    tmpfun <- function(x){
-      tab <- tabulate(factor(x, levels = unique(x)))
-      to <- cumsum(tab)
-      from <- c(0L, to[-length(to)])+ 1L
-      res <- mapply(seq, from, to, SIMPLIFY=FALSE)
-      names(res) <- unique(x)
-      res
-    }    
-    tmp <- unique(allele.data)
-    ind <- match(tmp, allele.data)
-    ## named list with position of the columns for each locus 
-    pos <- tmpfun(locus.data[ind]) 
     
-    allele.data <- factor(allele.data, levels=unique(allele.data))
-    ind.data    <- factor(ind.data, levels=ind.names)
+  }
+  if(any(ploidy < 1L)) stop("ploidy cannot be less than 1")
+  
+  ## check individual labels
+  if(is.null(ind.names)) ind.names <- rownames(X)
+  if(is.null(ind.names)) ind.names <- .genlab("",n)
+  if(any(duplicated(ind.names))){
+    warning("duplicate labels detected for some individuals; using generic labels")
+    ind.names <- .genlab("",n)
+  }
+  rownames(X) <- ind.names
+  
+  ## check locus labels
+  if(is.null(loc.names)) loc.names <- colnames(X)
+  if(is.null(loc.names)) loc.names <- .genlab("loc",nloc)
+  if(any(duplicated(loc.names))){
+    warning("duplicate labels detected for some loci; using generic labels")
+    loc.names <- .genlab("loc",nloc)
+  }
+  if(length(grep("[.]", loc.names))>0L){
+    warning("character '.' detected in names of loci; replacing with '_'")
+    gsub("[.]","_", loc.names)
+  }
+  colnames(X) <- loc.names
+  
+  
+  ## check alleles for periods
+  if (length(grep("[.]", X)) > 0L){
+    if (is.null(sep) || sep != "_"){
+      warning("character '.' detected in names of loci; replacing with '_'")
+      replacement <- "_"
+    } else {
+      warning("character '.' detected in names of loci; replacing with 'p'")
+      replacement <- "p"
+    }
+    X <- apply(X, 2, function(i) gsub("[.]", replacement, i))
+  }
+  
+  ## PRESENCE/ABSENCE MARKERS ##
+  if(toupper(type)=="PA"){
+    ## preliminary stuff
+    rownames(X) <- ind.names
+    colnames(X) <- loc.names
     
-    out         <- table(ind.data, allele.data)
-#    out         <- out[ind.names, , drop = FALSE] # table sorts alphabetically. This resets.
-
-    ## force type 'matrix'
-    class(out) <- NULL
-    dimnames(out) <- list(rownames(out), colnames(out))
-
-    ## restore NAs
-    ##
-    ## Thanks to Klaus Schliep for the proposed speedup:
-    ##
-    # if (length(NA.posi) > 0) {
-    #     out.colnames <- colnames(out)
-    #     NA.row <- match(NA.ind, rownames(out))
-    #     loc <- paste0(NA.locus, "\\.")
-    #     uloc <- unique(loc)
-    #     loc.list <- lapply(uloc, grep, out.colnames)
-    #     NA.col <- match(loc, uloc)
-    #     out[cbind(rep(NA.row, unlist(lapply(loc.list, length))[NA.col]), unlist(loc.list[NA.col]))] <- NA
-    #  }
-    ## This one is modified from above to make everything more explicit.
-    if (length(NA.posi) > 0) {
-      NA.row <- match(NA.ind, rownames(out))
-      uloc <- unique(NA.locus)
-      loc.list <- pos[uloc] ## subset pos 
-      NA.col <- match(NA.locus, uloc)
-
-      # Coordinates for missing rows
-      missing.ind <- vapply(loc.list, length, integer(1))[NA.col]
-      missing.ind <- rep(NA.row, missing.ind)
-      # Coordinates for missing columns
-      missing.loc <- unlist(loc.list[NA.col], use.names = FALSE)
-
-      missing_coordinates <- matrix(0L, nrow = length(missing.ind), ncol = 2L)
-      missing_coordinates[, 1] <- missing.ind
-      missing_coordinates[, 2] <- missing.loc
-      #      [,1] [,2]
-      # [1,]    2    1
-      # [2,]    3    1
-      # [3,]    4   13
-      # [4,]    4   14
-
-      out[missing_coordinates] <- NA
-
-      #          X1401_25.33
-      # A_KH1584           1
-      # C_KH1059           1
-      # M_KH1834           1
-      # M_KH1837           1
+    ## Erase entierely non-typed loci
+    temp <- colSums(is.na(X))==nrow(X)
+    if(any(temp)){
+      X <- X[,!temp]
+      warning("Markers with no scored alleles have been removed")
     }
-    if(check.ploidy){
-      ploidmat <- vapply(pos, function(i) rowSums(out[, i, drop = FALSE], 
-                         na.rm = TRUE), FUN.VALUE = double(nrow(out)))      
-      if (max(ploidmat, na.rm = TRUE) > max(ploidy, na.rm = TRUE)) {
-        oran <- paste(range(ploidmat, na.rm = TRUE), collapse = "-")
-        eran <- paste(range(ploidy, na.rm = TRUE), collapse = "-")
-        msg <- paste0("The observed allele dosage (", oran, ") ", 
-                      "does not match the defined ploidy ", "(", eran, ").\n",
-                      "Please check that your input parameters (ncode, sep) ",
-                      "are correct.")
-        warning(msg, immediate. = TRUE)
-      }
+    
+    ## erase non-polymorphic loci
+    temp <- apply(X, 2, function(loc) length(unique(loc[!is.na(loc)]))==1)
+    if(any(temp)){
+      X <- X[,!temp,drop=FALSE]
+      loc.names <- loc.names[!temp]
+      nloc <- ncol(X)
+      warning("non-polymorphic marker(s) deleted")
     }
-    ## call upon genind constructor
+    
     prevcall <- match.call()
-    out <- genind(tab=out, pop=pop, prevcall=prevcall, ploidy=ploidy, type=type,
-                  strata = strata, hierarchy = hierarchy)
-
-    return(out)
+    
+    res <- genind(tab=X, pop=pop, prevcall=prevcall, ploidy=ploidy,
+                  type = "PA", strata = strata, hierarchy = hierarchy)
+    
+    return(res)
+  } # end type PA
+  
+  
+  ## CODOMINANT MARKERS ##
+  ## make sure X is in character mode
+  mode(X) <- "character"
+  
+  
+  ## HANDLE MISSING SEPARATORS
+  if(is.null(sep) && any(ploidy>1)){
+    ## check that ncode is provided
+    if(is.null(ncode)) stop("please indicate either the separator (sep) or the number of characters coding an allele (ncode).")
+    
+    ## add "/" as separator
+    X <- gsub(paste0("([[:alnum:]]{",ncode,"})"), "\\1/", X)
+    X <- sub("/$","",X)
+    sep <- "/"
+  }
+  
+  ## HANDLE NAs
+  ## find all strings which are in fact NAs
+  NA.list <- unlist(lapply(unique(ploidy), function(nrep) paste(rep(NA.char, nrep), collapse=sep)))
+  NA.list <- unique(c(NA.list, NA.char))
+  
+  ## replace NAs
+  X[X %in% NA.list] <- NA
+  
+  ## erase entirely non-type loci
+  toRemove <- which(colSums(is.na(X))==nrow(X))
+  if(length(toRemove) > 0){
+    X <- X[,-toRemove, drop = FALSE]
+    loc.names <- loc.names[-toRemove]
+    warning("Markers with no scored alleles have been removed")
+  }
+  
+  
+  ## erase entierely non-type individuals
+  toRemove <- which(rowSums(is.na(X))==ncol(X))
+  if(length(toRemove) > 0){
+    X <- X[-toRemove, , drop = FALSE]
+    ind.names <- rownames(X)
+    ploidy <- ploidy[-toRemove]
+    if(!is.null(pop)) pop <- pop[-toRemove]
+    warning("Individuals with no scored loci have been removed")
+  }
+  
+  
+  ## TRANSLATE DATA INTO ALLELE COUNTS ##
+  ## get dimensions of X
+  nloc <- ncol(X)
+  nind <- nrow(X)
+  
+  ## unfold data for each cell of the table
+  if (any(ploidy > 1)){
+    allele.data <- strsplit(X, sep)
+    n.items <- lengths(allele.data)
+    locus.data <- rep(rep(loc.names, each = nind), n.items)
+    ind.data <- rep(rep(ind.names,ncol(X)), n.items)
+    allele.data <- unlist(allele.data)
+  } else {
+    n.items     <- rep(1, length(X))
+    locus.data  <- rep(rep(loc.names, each=nind), n.items)
+    ind.data    <- rep(rep(ind.names, ncol(X)), n.items)
+    allele.data <- unlist(X)
+  }
+  
+  
+  ## identify NAs
+  NA.posi <- which(is.na(allele.data))
+  NA.ind <- ind.data[NA.posi]
+  NA.locus <- locus.data[NA.posi]
+  
+  ## remove NAs
+  if(length(NA.posi)>0){
+    allele.data <- allele.data[-NA.posi]
+    locus.data <- locus.data[-NA.posi]
+    ind.data <- ind.data[-NA.posi]
+  }
+  
+  ## get matrix of allele counts
+  allele.data <- paste(locus.data, allele.data, sep=".")
+  
+  tmpfun <- function(x){
+    tab <- tabulate(factor(x, levels = unique(x)))
+    to <- cumsum(tab)
+    from <- c(0L, to[-length(to)])+ 1L
+    res <- mapply(seq, from, to, SIMPLIFY=FALSE)
+    names(res) <- unique(x)
+    res
+  }    
+  tmp <- unique(allele.data)
+  ind <- match(tmp, allele.data)
+  ## named list with position of the columns for each locus 
+  pos <- tmpfun(locus.data[ind]) 
+  
+  allele.data <- factor(allele.data, levels=unique(allele.data))
+  ind.data    <- factor(ind.data, levels=ind.names)
+  
+  out         <- table(ind.data, allele.data)
+  #    out         <- out[ind.names, , drop = FALSE] # table sorts alphabetically. This resets.
+  
+  ## force type 'matrix'
+  class(out) <- NULL
+  dimnames(out) <- list(rownames(out), colnames(out))
+  
+  ## restore NAs
+  ##
+  ## Thanks to Klaus Schliep for the proposed speedup:
+  ##
+  # if (length(NA.posi) > 0) {
+  #     out.colnames <- colnames(out)
+  #     NA.row <- match(NA.ind, rownames(out))
+  #     loc <- paste0(NA.locus, "\\.")
+  #     uloc <- unique(loc)
+  #     loc.list <- lapply(uloc, grep, out.colnames)
+  #     NA.col <- match(loc, uloc)
+  #     out[cbind(rep(NA.row, unlist(lapply(loc.list, length))[NA.col]), unlist(loc.list[NA.col]))] <- NA
+  #  }
+  ## This one is modified from above to make everything more explicit.
+  if (length(NA.posi) > 0) {
+    NA.row <- match(NA.ind, rownames(out))
+    uloc <- unique(NA.locus)
+    loc.list <- pos[uloc] ## subset pos 
+    NA.col <- match(NA.locus, uloc)
+    
+    # Coordinates for missing rows
+    missing.ind <- vapply(loc.list, length, integer(1))[NA.col]
+    missing.ind <- rep(NA.row, missing.ind)
+    # Coordinates for missing columns
+    missing.loc <- unlist(loc.list[NA.col], use.names = FALSE)
+    
+    missing_coordinates <- matrix(0L, nrow = length(missing.ind), ncol = 2L)
+    missing_coordinates[, 1] <- missing.ind
+    missing_coordinates[, 2] <- missing.loc
+    #      [,1] [,2]
+    # [1,]    2    1
+    # [2,]    3    1
+    # [3,]    4   13
+    # [4,]    4   14
+    
+    out[missing_coordinates] <- NA
+    
+    #          X1401_25.33
+    # A_KH1584           1
+    # C_KH1059           1
+    # M_KH1834           1
+    # M_KH1837           1
+  }
+  if(check.ploidy){
+    ploidmat <- vapply(pos, function(i) rowSums(out[, i, drop = FALSE], 
+                                                na.rm = TRUE), FUN.VALUE = double(nrow(out)))      
+    if (max(ploidmat, na.rm = TRUE) > max(ploidy, na.rm = TRUE)) {
+      oran <- paste(range(ploidmat, na.rm = TRUE), collapse = "-")
+      eran <- paste(range(ploidy, na.rm = TRUE), collapse = "-")
+      msg <- paste0("The observed allele dosage (", oran, ") ", 
+                    "does not match the defined ploidy ", "(", eran, ").\n",
+                    "Please check that your input parameters (ncode, sep) ",
+                    "are correct.")
+      warning(msg, immediate. = TRUE)
+    }
+  }
+  ## call upon genind constructor
+  prevcall <- match.call()
+  out <- genind(tab=out, pop=pop, prevcall=prevcall, ploidy=ploidy, type=type,
+                strata = strata, hierarchy = hierarchy)
+  
+  return(out)
 } # end df2genind
 
 
