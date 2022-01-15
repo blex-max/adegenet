@@ -193,14 +193,14 @@ df2genind <- function(X, sep=NULL, ncode=NULL, ind.names=NULL, loc.names=NULL,
         }
 
         ## Erase entierely non-type individuals
-        temp <- rowSums(is.na(X))==ncol(X)
-        if(any(temp)){
-            X <- X[!temp,,drop=FALSE]
-            if(!is.null(pop)) pop <- pop[!temp]
-            ploidy <- ploidy[!temp]
-            ind.names <- ind.names[!temp]
-            warning("Individuals with no scored loci have been removed")
-        }
+##        temp <- rowSums(is.na(X))==ncol(X)
+##        if(any(temp)){
+##            X <- X[!temp,,drop=FALSE]
+##            if(!is.null(pop)) pop <- pop[!temp]
+##            ploidy <- ploidy[!temp]
+##            ind.names <- ind.names[!temp]
+##            warning("Individuals with no scored loci have been removed")
+##        }
 
         ## erase non-polymorphic loci
         temp <- apply(X, 2, function(loc) length(unique(loc[!is.na(loc)]))==1)
