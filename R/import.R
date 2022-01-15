@@ -242,18 +242,6 @@ df2genind <- function(X, sep=NULL, ncode=NULL, ind.names=NULL, loc.names=NULL,
     warning("Markers with no scored alleles have been removed")
   }
   
-  
-  ## erase entierely non-type individuals
-  toRemove <- which(rowSums(is.na(X))==ncol(X))
-  if(length(toRemove) > 0){
-    X <- X[-toRemove, , drop = FALSE]
-    ind.names <- rownames(X)
-    ploidy <- ploidy[-toRemove]
-    if(!is.null(pop)) pop <- pop[-toRemove]
-    warning("Individuals with no scored loci have been removed")
-  }
-  
-  
   ## TRANSLATE DATA INTO ALLELE COUNTS ##
   ## get dimensions of X
   nloc <- ncol(X)
